@@ -5,6 +5,9 @@ import { useState } from "react";
 
 export default function App() {
   const [device, setDevice] = useState(null);
+  const [macId, setMacId] = useState("");
+  // const [maserviceUUIDcId, setserviceUUID] = useState("");
+  // const [characteristicUUID, setcharacteristicUUID] = useState("");
 
   const serviceUUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
   const characteristicUUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
@@ -18,6 +21,7 @@ export default function App() {
       }
 
       if (device.name === "ESP32") {
+        setMacId(device.id);
         setDevice(device);
         manager.stopDeviceScan();
       }
@@ -52,7 +56,7 @@ export default function App() {
     <View>
       <Text>BLE Device Connection</Text>
       <Button title="Scan for Devices" onPress={scanForDevices} />
-      <Button title="Connect" onPress={() => connectToDevice(device.id)} />
+      <Button title="Connect" onPress={() => connectToDevice(macId)} />
       <Button title="Sentdata" onPress={() => sendData(device)} />
     </View>
   );
