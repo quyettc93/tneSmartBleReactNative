@@ -37,6 +37,7 @@ export default function App() {
   // const idEsp = "F0:24:F9:43:45:6E";
   const serviceUUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
   const characteristicUUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+  console.log("isConnected", isConnected);
 
   const blemanager = new BleManager();
 
@@ -50,12 +51,11 @@ export default function App() {
   const handleBarcodeScanned = ({ type, data }) => {
     setScanned(true);
     try {
-      const parsedDataRow = data;
       const parsedData = JSON.parse(data);
       console.log("quet ra dc ru Qr", parsedData);
       setIdFromQr(parsedData); // Save QR data
       setCameraEnabled(false); // Turn off camera after scan
-      scanForDevices(parsedData, parsedDataRow); // Connect directly using MAC address from QR code
+      scanForDevices(parsedData); // Connect directly using MAC address from QR code
     } catch (error) {
       Alert.alert("Error", "Invalid QR Code data");
     }
@@ -117,7 +117,7 @@ export default function App() {
     }
   };
   //Scan thiet bi
-  const scanForDevices = (data, parsedDataRow) => {
+  const scanForDevices = (data) => {
     console.log("Scanning for devices...", data.name);
     blemanager.startDeviceScan(null, null, (error, device) => {
       console.log("Scanning...123");
@@ -129,22 +129,28 @@ export default function App() {
       if (device.name === data.name && device.id === data.id) {
         console.log("Found device", device);
         setDevice(device);
-        connectToDevice(parsedDataRow, device.id);
+        connectToDevice(device.id);
         blemanager.stopDeviceScan();
       }
     });
   };
 
-  const connectToDevice = async (parsedDataRow, deviceId) => {
+  const connectToDevice = async (deviceId) => {
+    if (deviceId === "F0:24:F9:43:45:6E") {
+      console.log("Ket noi thanh cong");
+    } else {
+      console.log("Ket noi that bai");
+    }
     try {
       const deviceConnect = await blemanager.connectToDevice(deviceId);
       const services =
         await deviceConnect.discoverAllServicesAndCharacteristics(); // Lấy tất cả dịch vụ và đặc điểm của thiết bị
       setIsConnected(true);
       if (services) {
+        console.log("services123");
         setIsConnected(true);
-        if (data) {
-          await saveLastDevice(parsedDataRow); // Lưu thông tin thiết bị đã kết nối
+        if (services) {
+          await saveLastDevice(services); // Lưu thông tin thiết bị đã kết nối
         }
       } else {
         Alert.alert(
@@ -159,8 +165,9 @@ export default function App() {
   //Save last device connected
   const saveLastDevice = async (data) => {
     try {
-      await AsyncStorage.setItem("LAST_DEVICE", data);
-      console.log("Last connected device saved:", data);
+      const jsonData = JSON.stringify(data);
+      await AsyncStorage.setItem("LAST_DEVICE", jsonData);
+      console.log("Last connected device saved:", jsonData);
     } catch (error) {
       console.error("Error saving last connected device:", error);
     }
@@ -170,7 +177,8 @@ export default function App() {
     try {
       console.log("Fetching last connected device");
       const lastDevice = await AsyncStorage.getItem("LAST_DEVICE");
-      return lastDevice;
+      const parsedData = JSON.parse(lastDevice);
+      return parsedData;
     } catch (error) {
       console.error("Error fetching last connected device:", error);
       return null;
@@ -179,9 +187,9 @@ export default function App() {
   const handleReconnect = async () => {
     console.log("Reconnecting to last device");
     const lastDevice = await getLastDevice();
-    const parsedData = JSON.parse(lastDevice);
-    if (parsedData) {
-      scanForDevices(parsedData);
+    if (lastDevice) {
+      console.log("Last device found");
+      connectToDevice(lastDevice.id);
       // connectToDevice(parsedData.name);
       // setCameraEnabled(false); // Turn off camera after scan
       // setMacAddress(parsedData.name); // Assuming QR data contains mac address
