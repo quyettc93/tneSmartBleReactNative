@@ -20,6 +20,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
 import { Audio } from "expo-av";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { use } from "react";
 
 export default function App() {
   const [isHoldPressed, setIsHoldPressed] = useState(false);
@@ -37,9 +38,22 @@ export default function App() {
   // const idEsp = "F0:24:F9:43:45:6E";
   const serviceUUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
   const characteristicUUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-  console.log("isConnected", isConnected);
+  console.log("isConnected, idqr", isConnected, idFromQr);
 
   const blemanager = new BleManager();
+
+  useEffect(() => {
+    saveLastDevice(device, idFromQr);
+  }, [device, idFromQr]);
+  console.log("device. iqr", device, idFromQr);
+
+  useEffect(() => {
+    requestPermissions();
+    return () => {
+      // Cleanup BLE manager when the component unmounts
+      blemanager.destroy();
+    };
+  }, []);
 
   const handlePermissionRequest = () => {
     requestPermission().then(() => {
@@ -128,30 +142,35 @@ export default function App() {
       console.log("device", device);
       if (device.name === data.name && device.id === data.id) {
         console.log("Found device", device);
-        setDevice(device);
-        connectToDevice(device.id);
+        // setDevice(device);
+        connectToDevice(device.id, data);
         blemanager.stopDeviceScan();
       }
     });
   };
 
-  const connectToDevice = async (deviceId) => {
+  const connectToDevice = async (deviceId, data) => {
     if (deviceId === "F0:24:F9:43:45:6E") {
       console.log("Ket noi thanh cong");
     } else {
       console.log("Ket noi that bai");
+      // alert("Chưa có kết nối trước đó, Hãy quét QR để kết nối");
     }
     try {
       const deviceConnect = await blemanager.connectToDevice(deviceId);
       const services =
         await deviceConnect.discoverAllServicesAndCharacteristics(); // Lấy tất cả dịch vụ và đặc điểm của thiết bị
+      setDevice(services);
+
       setIsConnected(true);
       if (services) {
         console.log("services123");
         setIsConnected(true);
-        if (services) {
-          await saveLastDevice(services); // Lưu thông tin thiết bị đã kết nối
-        }
+        console.log("Connected to idFromQr", idFromQr);
+        // if (!idFromQr) {
+        //   console.log("data1", data);
+        //   await saveLastDevice(services, data); // Lưu thông tin thiết bị đã kết nối
+        // }
       } else {
         Alert.alert(
           "Connection failed",
@@ -163,10 +182,14 @@ export default function App() {
     }
   };
   //Save last device connected
-  const saveLastDevice = async (data) => {
+  const saveLastDevice = async (services, data) => {
     try {
+      const jsonServices = JSON.stringify(services);
+      await AsyncStorage.setItem("LAST_DEVICE_ESP", jsonServices);
+      console.log("Last connected device saved:", jsonServices);
+      console.log("data", data);
       const jsonData = JSON.stringify(data);
-      await AsyncStorage.setItem("LAST_DEVICE", jsonData);
+      await AsyncStorage.setItem("ID_FROM_QR", jsonData);
       console.log("Last connected device saved:", jsonData);
     } catch (error) {
       console.error("Error saving last connected device:", error);
@@ -176,8 +199,17 @@ export default function App() {
   const getLastDevice = async () => {
     try {
       console.log("Fetching last connected device");
-      const lastDevice = await AsyncStorage.getItem("LAST_DEVICE");
+      const lastDevice = await AsyncStorage.getItem("LAST_DEVICE_ESP");
       const parsedData = JSON.parse(lastDevice);
+
+      console.log("Fetching last connected device");
+      const lastIdQr = await AsyncStorage.getItem("ID_FROM_QR");
+      const parsedlastIdQr = JSON.parse(lastIdQr);
+      setIdFromQr(parsedlastIdQr);
+
+      if (!idFromQr) {
+        setDevice(parsedData);
+      }
       return parsedData;
     } catch (error) {
       console.error("Error fetching last connected device:", error);
@@ -188,14 +220,8 @@ export default function App() {
     console.log("Reconnecting to last device");
     const lastDevice = await getLastDevice();
     if (lastDevice) {
-      console.log("Last device found");
+      console.log("Last device found", lastDevice);
       connectToDevice(lastDevice.id);
-      // connectToDevice(parsedData.name);
-      // setCameraEnabled(false); // Turn off camera after scan
-      // setMacAddress(parsedData.name); // Assuming QR data contains mac address
-      // setButtonCount(parsedData.count);
-      // setShow(parsedData.show);
-      // setIdDeviceAddPass(parsedData); // Save QR data
     } else {
       Alert.alert("No device", "No previously connected device found.");
     }
@@ -257,7 +283,7 @@ export default function App() {
             }}
           />
           <View style={styles.container}>
-            {idFromQr ? (
+            {idFromQr || device ? (
               <View style={styles.resultContainer}>
                 {isConnected ? (
                   <View style={styles.container}>
