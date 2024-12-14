@@ -31,6 +31,16 @@ export default function App() {
   const [hasPermissions, setHasPermissions] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [idFromQr, setIdFromQr] = useState(null);
+  const [callBinary, setCallBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
+  const [funcBinary, setFuncBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
+  const [arrSentData, setArrSentData] = useState([
+    "0x00",
+    "0x00",
+    "0x00",
+    "0x00",
+  ]);
+
+  console.log("callBinary", callBinary);
   // const [maserviceUUIDcId, setserviceUUID] = useState("");
   // const [characteristicUUID, setcharacteristicUUID] = useState("");
 
@@ -38,14 +48,15 @@ export default function App() {
   // const idEsp = "F0:24:F9:43:45:6E";
   const serviceUUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
   const characteristicUUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-  console.log("isConnected, idqr", isConnected, idFromQr);
+  // console.log("isConnected, idqr", isConnected, idFromQr);
 
   const blemanager = new BleManager();
 
   useEffect(() => {
-    saveLastDevice(device, idFromQr);
-  }, [device, idFromQr]);
-  console.log("device. iqr", device, idFromQr);
+    if (idFromQr !== null && device !== null) {
+      saveLastDevice(device, idFromQr);
+    }
+  }, [idFromQr, device]);
 
   useEffect(() => {
     requestPermissions();
@@ -67,9 +78,13 @@ export default function App() {
     try {
       const parsedData = JSON.parse(data);
       console.log("quet ra dc ru Qr", parsedData);
-      setIdFromQr(parsedData); // Save QR data
-      setCameraEnabled(false); // Turn off camera after scan
-      scanForDevices(parsedData); // Connect directly using MAC address from QR code
+      if (parsedData) {
+        setIdFromQr(parsedData); // Save QR data
+        setCameraEnabled(false); // Turn off camera after scan
+        scanForDevices(parsedData); // Connect directly using MAC address from QR code
+      } else {
+        Alert.alert("Error", "parsedData ko ton tai");
+      }
     } catch (error) {
       Alert.alert("Error", "Invalid QR Code data");
     }
@@ -166,11 +181,6 @@ export default function App() {
       if (services) {
         console.log("services123");
         setIsConnected(true);
-        console.log("Connected to idFromQr", idFromQr);
-        // if (!idFromQr) {
-        //   console.log("data1", data);
-        //   await saveLastDevice(services, data); // Lưu thông tin thiết bị đã kết nối
-        // }
       } else {
         Alert.alert(
           "Connection failed",
@@ -224,6 +234,40 @@ export default function App() {
       connectToDevice(lastDevice.id);
     } else {
       Alert.alert("No device", "No previously connected device found.");
+    }
+  };
+
+  //nhan nut gui du lieu
+  const handleButtonPress = (buttonNumber) => {
+    // playSound(); // Play sound when button is pressed
+    if (isConnected) {
+      const numberFloor = 7; //0 đến 7 là thành 8 tầng
+      setCallBinary((prev) => {
+        const newCallBinary = [...prev];
+        for (let i = 0; i < newCallBinary.length; i++) {
+          // newCallBinary[numberFloor - buttonNumber] = 1;
+          const index = numberFloor - buttonNumber;
+          if (i === index) {
+            newCallBinary[i] = 1;
+          } else {
+            newCallBinary[i] = 0;
+          }
+        }
+        return newCallBinary;
+      });
+
+      // setTimeout(() => {
+      //   setCallBinary((prevState) => {
+      //     const newState = [...prevState];
+      //     newState[numberFloor - buttonNumber] = 0; // Đặt lại giá trị về 0 sau 1 giây
+      //     return newState;
+      //   });
+      // }, 1000);
+    } else {
+      Alert.alert(
+        "Bluetooth not connected",
+        "Please connect to a Bluetooth device first."
+      );
     }
   };
 
@@ -293,7 +337,7 @@ export default function App() {
                           <TouchableOpacity
                             style={styles.buttonCall}
                             key={i}
-                            // onPress={() => handleButtonPress(i)}
+                            onPress={() => handleButtonPress(i)}
                           >
                             <Text style={styles.buttonText}>
                               {idFromQr.display[i]}
