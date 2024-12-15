@@ -1,9 +1,8 @@
 import { BleManager } from "react-native-ble-plx";
 import { Buffer } from "buffer";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { PermissionsAndroid, Platform } from "react-native";
 import * as ExpoDevice from "expo-device";
-import Permissions from "./component/bleCallClient/Permissions";
 
 import {
   Button,
@@ -20,17 +19,22 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
 import { Audio } from "expo-av";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { use } from "react";
 
 export default function App() {
   const [isHoldPressed, setIsHoldPressed] = useState(false);
   const [isConnected, setIsConnected] = useState(false); // Correctly managing connection state
   const [scanned, setScanned] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
-  const [device, setDevice] = useState(null);
+  const [connectedDevice, setConnectedDevice] = useState(null); // Lưu thiết bị đã kết nối
   const [hasPermissions, setHasPermissions] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
-  const [idFromQr, setIdFromQr] = useState(null);
+  const [idFromQr, setIdFromQr] = useState({
+    display: ["G", "1", "2", "3", "4"],
+    id: "F0:24:F9:43:45:6E",
+    name: "ESP32 QUYET",
+    numberFloor: "5",
+  });
+  const [a, seta] = useState("");
   const [callBinary, setCallBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
   const [funcBinary, setFuncBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
   const [arrSentData, setArrSentData] = useState([
@@ -39,32 +43,47 @@ export default function App() {
     "0x00",
     "0x00",
   ]);
+  const [button, setButton] = useState(false);
 
-  console.log("callBinary", callBinary);
   // const [maserviceUUIDcId, setserviceUUID] = useState("");
   // const [characteristicUUID, setcharacteristicUUID] = useState("");
-
   // const nameEsp = "ESP32 QUYET";
   // const idEsp = "F0:24:F9:43:45:6E";
+
   const serviceUUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
   const characteristicUUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+  const value = "SGVsbG87"; // Dữ liệu cần gửi (ở định dạng base64)
   // console.log("isConnected, idqr", isConnected, idFromQr);
+  // Log when the component re-renders
+  console.log("Component re-rendered");
+  const bleManager = new BleManager();
+  console.log("connectedDevice dau tienn", connectedDevice);
+  // useEffect(() => {
+  //   console.log("callBinaryfect");
+  //   writeDataToDevice();
+  // }, [callBinary]);
 
-  const blemanager = new BleManager();
+  // useEffect(() => {
+  //   if (idFromQr !== null && connectedDevice !== null) {
+  //     saveLastDevice(connectedDevice, idFromQr);
+  //   }
+  // }, [idFromQr]);
 
-  useEffect(() => {
-    if (idFromQr !== null && device !== null) {
-      saveLastDevice(device, idFromQr);
-    }
-  }, [idFromQr, device]);
+  // useEffect(() => {
+  //   requestPermissions();
+  //   return () => {
+  //     // Cleanup BLE manager when the component unmounts
+  //     bleManager.destroy();
+  //   };
+  // }, []);
 
-  useEffect(() => {
-    requestPermissions();
-    return () => {
-      // Cleanup BLE manager when the component unmounts
-      blemanager.destroy();
-    };
-  }, []);
+  // useEffect(() => {
+  //   if (isConnected) {
+  //     let newState = [...funcBinary];
+  //     newState[5] = isHoldPressed ? 1 : 0;
+  //     setFuncBinary(newState);
+  //   }
+  // }, [isHoldPressed]);
 
   const handlePermissionRequest = () => {
     requestPermission().then(() => {
@@ -81,7 +100,7 @@ export default function App() {
       if (parsedData) {
         setIdFromQr(parsedData); // Save QR data
         setCameraEnabled(false); // Turn off camera after scan
-        scanForDevices(parsedData); // Connect directly using MAC address from QR code
+        scanForPeripherals(parsedData); // Connect directly using MAC address from QR code
       } else {
         Alert.alert("Error", "parsedData ko ton tai");
       }
@@ -90,13 +109,13 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    requestPermissions();
-    return () => {
-      // Cleanup BLE manager when the component unmounts
-      blemanager.destroy();
-    };
-  }, []);
+  // useEffect(() => {
+  //   requestPermissions();
+  //   return () => {
+  //     // Cleanup BLE manager when the component unmounts
+  //     bleManager.destroy();
+  //   };
+  // }, []);
   //Phan Quyen
   const requestPermissions = async () => {
     if (Platform.OS === "android") {
@@ -146,55 +165,99 @@ export default function App() {
     }
   };
   //Scan thiet bi
-  const scanForDevices = (data) => {
-    console.log("Scanning for devices...", data.name);
-    blemanager.startDeviceScan(null, null, (error, device) => {
-      console.log("Scanning...123");
+  const scanForPeripherals = useCallback(() => {
+    console.log("Bắt đầu quét thiết bị BLE...");
+    bleManager.startDeviceScan(null, null, (error, device) => {
       if (error) {
-        console.log("LOI", error);
+        console.error("Lỗi khi quét thiết bị:", error);
         return;
       }
-      console.log("device", device);
-      if (device.name === data.name && device.id === data.id) {
-        console.log("Found device", device);
-        // setDevice(device);
-        connectToDevice(device.id, data);
-        blemanager.stopDeviceScan();
+
+      if (device.localName === "ESP32 QUYET") {
+        console.log("Tìm thấy thiết bị:", device.localName);
+        bleManager.stopDeviceScan();
+        setConnectedDevice((prevDevice) => {
+          if (device) {
+            return device;
+          }
+          return prevDevice; // Không ghi đè khi không có thiết bị mới
+        });
+        connectToPeripheral(device);
       }
     });
-  };
+  }, []);
 
-  const connectToDevice = async (deviceId, data) => {
-    if (deviceId === "F0:24:F9:43:45:6E") {
-      console.log("Ket noi thanh cong");
-    } else {
-      console.log("Ket noi that bai");
-      // alert("Chưa có kết nối trước đó, Hãy quét QR để kết nối");
-    }
+  // Hàm kết nối với thiết bị
+  const connectToPeripheral = useCallback(async (device) => {
+    console.log(
+      `Đang kết nối với thiết bị: ${device.localName} (${device.id})`
+    );
     try {
-      const deviceConnect = await blemanager.connectToDevice(deviceId);
-      const services =
-        await deviceConnect.discoverAllServicesAndCharacteristics(); // Lấy tất cả dịch vụ và đặc điểm của thiết bị
-      setDevice(services);
-
-      setIsConnected(true);
-      if (services) {
-        console.log("services123");
-        setIsConnected(true);
+      const connectedDeviceNew = await bleManager.connectToDevice(device.id);
+      console.log("Đã kết nối thành công:", connectedDeviceNew);
+      const servers =
+        await connectedDeviceNew.discoverAllServicesAndCharacteristics(); // Khám phá các dịch vụ
+      // Ensure connectedDevice is valid before setting state
+      if (servers) {
+        console.log("Updating state with connected device", connectedDevice);
+        // setConnectedDevice((prevDevice) => {
+        //   if (connectedDeviceNew) {
+        //     return connectedDeviceNew;
+        //   }
+        //   return prevDevice; // Không ghi đè khi không có thiết bị mới
+        // });
+        console.log("co vao lai day ko");
+        // setConnectedDevice(connectedDeviceNew); // Lưu lại thiết bị đã kết nối
+        // setIsConnected(true); // Cập nhật trạng thái kết nối
+        console.log("Device state updated successfully.");
       } else {
-        Alert.alert(
-          "Connection failed",
-          `Failed to connect to device with MAC address`
-        );
+        console.error("Connected device is null or undefined.");
       }
     } catch (error) {
-      console.log("Connection failed", error);
+      console.error("Lỗi khi kết nối với thiết bị:", error);
+    }
+  }, []);
+
+  // Hàm gửi dữ liệu
+  const writeDataToDevice = async (serviceUUID, characteristicUUID, value) => {
+    console.log("writeDataToDevice", connectedDevice);
+    if (!connectedDevice) {
+      console.log("Chưa kết nối với thiết bị.");
+      return;
+    }
+
+    try {
+      const isConnected = await connectedDevice.isConnected();
+      if (!isConnected) {
+        console.log(`Device ${connectedDevice.id} is not connected`);
+        return;
+      }
+
+      console.log("Sending data...");
+      await connectedDevice.writeCharacteristicWithResponseForService(
+        serviceUUID,
+        characteristicUUID,
+        value
+      );
+      console.log("Gửi dữ liệu thành công.");
+    } catch (error) {
+      console.error("Lỗi khi gửi dữ liệu:", error);
     }
   };
+
+  // useEffect theo dõi biến button
+  // useEffect(() => {
+  //   if (button && isConnected && connectedDevice) {
+  //     writeDataToDevice(serviceUUID, characteristicUUID, value);
+  //     // Reset trạng thái button sau khi gửi xong
+  //     setButton(false);
+  //   }
+  // }, [button]); // Theo dõi button và trạng thái kết nối
+
   //Save last device connected
-  const saveLastDevice = async (services, data) => {
+  const saveLastDevice = async (device, data) => {
     try {
-      const jsonServices = JSON.stringify(services);
+      const jsonServices = JSON.stringify(device);
       await AsyncStorage.setItem("LAST_DEVICE_ESP", jsonServices);
       console.log("Last connected device saved:", jsonServices);
       console.log("data", data);
@@ -217,9 +280,6 @@ export default function App() {
       const parsedlastIdQr = JSON.parse(lastIdQr);
       setIdFromQr(parsedlastIdQr);
 
-      if (!idFromQr) {
-        setDevice(parsedData);
-      }
       return parsedData;
     } catch (error) {
       console.error("Error fetching last connected device:", error);
@@ -231,7 +291,7 @@ export default function App() {
     const lastDevice = await getLastDevice();
     if (lastDevice) {
       console.log("Last device found", lastDevice);
-      connectToDevice(lastDevice.id);
+      connectToPeripheral(lastDevice.id);
     } else {
       Alert.alert("No device", "No previously connected device found.");
     }
@@ -239,6 +299,7 @@ export default function App() {
 
   //nhan nut gui du lieu
   const handleButtonPress = (buttonNumber) => {
+    console.log("buttonNumber");
     // playSound(); // Play sound when button is pressed
     if (isConnected) {
       const numberFloor = 7; //0 đến 7 là thành 8 tầng
@@ -271,183 +332,199 @@ export default function App() {
     }
   };
 
-  const sendData = async (device) => {
-    try {
-      const hexArray = [
-        "0x3E",
-        "0x08",
-        "0x03",
-        "0x08",
-        "0x08",
-        "0x03",
-        "0x08",
-        "0x08",
-      ];
-
-      // Bước 1: Chuyển đổi từ hex sang số nguyên
-      const uint8Array = hexArray.map((hex) => parseInt(hex, 16));
-
-      // Bước 2: Tạo Buffer từ mảng số nguyên
-      const buffer = Buffer.from(uint8Array);
-
-      console.log("Buffer:", buffer); // Kết quả: <Buffer 3e 08 03 08 08 03 08 08>
-      await device.writeCharacteristicWithResponseForService(
-        serviceUUID,
-        characteristicUUID,
-        buffer.toString("base64") // Bluetooth LE yêu cầu dữ liệu phải ở dạng Base64
-      );
-
-      console.log("Data sent successfully!");
-    } catch (error) {
-      console.log("Error sending data", error);
-    }
+  const handleToogle = () => {
+    // playSound();
+    setIsHoldPressed((e) => !e);
   };
 
-  if (!cameraEnabled) {
-    return (
-      <>
-        <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
-        <ImageBackground
-          source={require("./assets/Image/bacg.jpg")} // Đường dẫn tới hình nền của bạn
-          style={{
-            flex: 1, // Đảm bảo ảnh nền phủ toàn bộ không gian
-            justifyContent: "center", // Căn giữa các phần tử con trong toàn bộ ứng dụng
-            alignItems: "center", // Căn giữa các phần tử con trong toàn bộ ứng dụng
-          }}
-        >
-          <LinearGradient
-            colors={["#ffffff", "#2c2d5e"]} // Từ trắng sang đen
-            style={{
-              position: "absolute", // Để lớp phủ nằm trên ảnh nền
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              opacity: 0.8,
-            }}
-          />
-          <View style={styles.container}>
-            {idFromQr || device ? (
-              <View style={styles.resultContainer}>
-                {isConnected ? (
-                  <View style={styles.container}>
-                    <View style={styles.buttonContainer}>
-                      {Array.from({ length: idFromQr.numberFloor }, (_, i) => (
-                        <View style={styles.buttonCallContainer} key={i}>
-                          <TouchableOpacity
-                            style={styles.buttonCall}
-                            key={i}
-                            onPress={() => handleButtonPress(i)}
-                          >
-                            <Text style={styles.buttonText}>
-                              {idFromQr.display[i]}
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                      ))}
-                    </View>
-                    <View style={{ marginTop: 30 }}>
-                      <TouchableOpacity
-                        style={[
-                          styles.buttonFunction,
-                          {
-                            backgroundColor: isHoldPressed
-                              ? "#7b4415" // Màu đỏ khi nhấn
-                              : "#fb970c", // Màu xanh khi thả
-                            borderColor: isHoldPressed ? "#242322" : "#4a4848", // Viền đỏ khi nhấn, viền xanh khi thả
-                            opacity: isHoldPressed ? 0.5 : 1,
-                          },
-                        ]}
-                        key={"buttonhold"}
-                        // onPress={() => handleToogle()}
-                      >
-                        <Text style={styles.buttonTextFunction}>HOLD</Text>
-                      </TouchableOpacity>
-                    </View>
-                    <View style={styles.containerRow}>
-                      <View style={styles.buttonDoor}>
-                        <TouchableOpacity
-                          style={[
-                            styles.buttonFunction,
-                            {
-                              backgroundColor: "#149d2b",
-                              borderColor: "#06640e",
-                            },
-                          ]}
-                          key={"buttonopen"}
-                          // onPress={() => handleButtonFunctionPress(6)}
-                        >
-                          <Text style={styles.buttonTextFunction}>OPEN</Text>
-                        </TouchableOpacity>
-                      </View>
-                      <View style={styles.buttonDoor}>
-                        <TouchableOpacity
-                          style={[
-                            styles.buttonFunction,
-                            {
-                              backgroundColor: "#c92107",
-                              borderColor: "#830707",
-                            },
-                          ]}
-                          key={"buttonclose"}
-                          // onPress={() => handleButtonFunctionPress(7)}
-                        >
-                          <Text style={styles.buttonTextFunction}>CLOSE</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  </View>
-                ) : (
-                  <Text style={styles.smarttne}>ĐANG KẾT NỐI</Text>
-                )}
-              </View>
-            ) : (
-              <View style={styles.container}>
-                <View style={styles.messageView}>
-                  <Text style={styles.message}>
-                    Cấp quyền camera để sử dụng ứng dụng
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.reconnectButton}
-                  onPress={handlePermissionRequest}
-                >
-                  <Text style={styles.reconnectButtonText}>
-                    QUÉT QR ĐỂ KẾT NỐI
-                  </Text>
-                </TouchableOpacity>
+  //function button open and close
+  const handleButtonFunctionPress = (buttonFunction) => {
+    // playSound(); // Play sound when button is pressed
+    if (isConnected) {
+      setFuncBinary((prev) => {
+        const newCallBinary = [...prev];
+        for (let i = 0; i < newCallBinary.length; i++) {
+          newCallBinary[i] =
+            i === 5 ? newCallBinary[i] : i === buttonFunction ? 1 : 0;
+        }
+        newCallBinary[buttonFunction] = 1;
+        return newCallBinary;
+      });
+    }
+  };
+  return (
+    <View style={{ flex: 1, padding: 20 }}>
+      <Button title="Quét thiết bị BLE" onPress={scanForPeripherals} />
 
-                <View>
-                  <TouchableOpacity
-                    style={styles.reconnectButton}
-                    onPress={handleReconnect}
-                  >
-                    <Text style={styles.reconnectButtonText}>KẾT NỐI LẠI</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-            <View>
-              <Text style={styles.logoText}>@tne.vn</Text>
-            </View>
-          </View>
-        </ImageBackground>
-      </>
-    );
-  } else {
-    return (
-      <View style={styles.container}>
-        <CameraView
-          style={styles.camera}
-          facing="back"
-          onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
-        />
-        {scanned && (
-          <Button title="Scan Again" onPress={() => setScanned(false)} />
-        )}
-      </View>
-    );
-  }
+      {isConnected ? (
+        <Text style={{ marginVertical: 20 }}>Đã kết nối với thiết bị BLE</Text>
+      ) : (
+        <Text style={{ marginVertical: 20 }}>Chưa kết nối thiết bị</Text>
+      )}
+
+      <Button
+        title="Gửi dữ liệu"
+        onPress={() =>
+          writeDataToDevice(serviceUUID, characteristicUUID, value)
+        }
+      />
+    </View>
+  );
+
+  // if (!cameraEnabled) {
+  //   return (
+  //     <>
+  //       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+  //       <ImageBackground
+  //         source={require("./assets/Image/bacg.jpg")} // Đường dẫn tới hình nền của bạn
+  //         style={{
+  //           flex: 1, // Đảm bảo ảnh nền phủ toàn bộ không gian
+  //           justifyContent: "center", // Căn giữa các phần tử con trong toàn bộ ứng dụng
+  //           alignItems: "center", // Căn giữa các phần tử con trong toàn bộ ứng dụng
+  //         }}
+  //       >
+  //         <LinearGradient
+  //           colors={["#ffffff", "#2c2d5e"]} // Từ trắng sang đen
+  //           style={{
+  //             position: "absolute", // Để lớp phủ nằm trên ảnh nền
+  //             top: 0,
+  //             left: 0,
+  //             right: 0,
+  //             bottom: 0,
+  //             opacity: 0.8,
+  //           }}
+  //         />
+  //         <View style={styles.container}>
+  //           {idFromQr && isConnected ? (
+  //             <View style={styles.resultContainer}>
+  //               {isConnected ? (
+  //                 <View style={styles.container}>
+  //                   <View style={styles.buttonContainer}>
+  //                     {Array.from({ length: idFromQr.numberFloor }, (_, i) => (
+  //                       <View style={styles.buttonCallContainer} key={i}>
+  //                         <TouchableOpacity
+  //                           style={styles.buttonCall}
+  //                           key={i}
+  //                           onPress={() => handleButtonPress(i)}
+  //                         >
+  //                           <Text style={styles.buttonText}>
+  //                             {idFromQr.display[i]}
+  //                           </Text>
+  //                         </TouchableOpacity>
+  //                       </View>
+  //                     ))}
+  //                   </View>
+  //                   <View style={{ marginTop: 30 }}>
+  //                     <TouchableOpacity
+  //                       style={[
+  //                         styles.buttonFunction,
+  //                         {
+  //                           backgroundColor: isHoldPressed
+  //                             ? "#7b4415" // Màu đỏ khi nhấn
+  //                             : "#fb970c", // Màu xanh khi thả
+  //                           borderColor: isHoldPressed ? "#242322" : "#4a4848", // Viền đỏ khi nhấn, viền xanh khi thả
+  //                           opacity: isHoldPressed ? 0.5 : 1,
+  //                         },
+  //                       ]}
+  //                       key={"buttonhold"}
+  //                       onPress={() => handleToogle()}
+  //                     >
+  //                       <Text style={styles.buttonTextFunction}>HOLD</Text>
+  //                     </TouchableOpacity>
+  //                   </View>
+  //                   <View style={styles.containerRow}>
+  //                     <View style={styles.buttonDoor}>
+  //                       <TouchableOpacity
+  //                         style={[
+  //                           styles.buttonFunction,
+  //                           {
+  //                             backgroundColor: "#149d2b",
+  //                             borderColor: "#06640e",
+  //                           },
+  //                         ]}
+  //                         key={"buttonopen"}
+  //                         onPress={() => handleButtonFunctionPress(6)}
+  //                       >
+  //                         <Text style={styles.buttonTextFunction}>OPEN</Text>
+  //                       </TouchableOpacity>
+  //                     </View>
+  //                     <Button
+  //                       title="Gửi dữ liệu"
+  //                       onPress={() => setButton(true)}
+  //                       disabled={!isConnected} // Chỉ gửi dữ liệu khi đã kết nối
+  //                     />
+  //                     <View style={styles.buttonDoor}>
+  //                       <TouchableOpacity
+  //                         style={[
+  //                           styles.buttonFunction,
+  //                           {
+  //                             backgroundColor: "#c92107",
+  //                             borderColor: "#830707",
+  //                           },
+  //                         ]}
+  //                         key={"buttonclose"}
+  //                         onPress={() => handleButtonFunctionPress(7)}
+  //                       >
+  //                         <Text style={styles.buttonTextFunction}>CLOSE</Text>
+  //                       </TouchableOpacity>
+  //                     </View>
+  //                   </View>
+  //                 </View>
+  //               ) : (
+  //                 <Text style={styles.smarttne}>ĐANG KẾT NỐI</Text>
+  //               )}
+  //             </View>
+  //           ) : (
+  //             <View style={styles.container}>
+  //               <View style={styles.messageView}>
+  //                 <Text style={styles.message}>
+  //                   Cấp quyền camera để sử dụng ứng dụng
+  //                 </Text>
+  //               </View>
+  //               <TouchableOpacity
+  //                 style={styles.reconnectButton}
+  //                 onPress={handlePermissionRequest}
+  //               >
+  //                 <Text style={styles.reconnectButtonText}>
+  //                   QUÉT QR ĐỂ KẾT NỐI
+  //                 </Text>
+  //               </TouchableOpacity>
+  //               <Button
+  //                 title="Quét thiết bị BLE"
+  //                 onPress={scanForPeripherals}
+  //               />
+
+  //               <View>
+  //                 <TouchableOpacity
+  //                   style={styles.reconnectButton}
+  //                   onPress={handleReconnect}
+  //                 >
+  //                   <Text style={styles.reconnectButtonText}>KẾT NỐI LẠI</Text>
+  //                 </TouchableOpacity>
+  //               </View>
+  //             </View>
+  //           )}
+  //           <View>
+  //             <Text style={styles.logoText}>@tne.vn</Text>
+  //           </View>
+  //         </View>
+  //       </ImageBackground>
+  //     </>
+  //   );
+  // } else {
+  //   return (
+  //     <View style={styles.container}>
+  //       <CameraView
+  //         style={styles.camera}
+  //         facing="back"
+  //         onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+  //       />
+  //       {scanned && (
+  //         <Button title="Scan Again" onPress={() => setScanned(false)} />
+  //       )}
+  //     </View>
+  //   );
+  // }
 }
 
 const styles = StyleSheet.create({

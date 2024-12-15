@@ -1,4 +1,9 @@
-import React, { useState, useEffect } from "react";
+import { BleManager } from "react-native-ble-plx";
+import { Buffer } from "buffer";
+import { useEffect, useState } from "react";
+import { PermissionsAndroid, Platform } from "react-native";
+import * as ExpoDevice from "expo-device";
+
 import {
   Button,
   View,
@@ -10,25 +15,20 @@ import {
   ImageBackground,
   StatusBar,
 } from "react-native";
-import RNBluetoothClassic from "react-native-bluetooth-classic";
 import { CameraView, useCameraPermissions } from "expo-camera";
-// import buttonData from "./buttonData.json"; // Import the custom button data
 import { LinearGradient } from "expo-linear-gradient";
 import { Audio } from "expo-av";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// QR scanner and Bluetooth handler
 export default function App() {
-  const [permission, requestPermission] = useCameraPermissions();
-  const [scanned, setScanned] = useState(false);
-  const [cameraEnabled, setCameraEnabled] = useState(false);
-  const [idDeviceAddPass, setIdDeviceAddPass] = useState(null);
-  const [isConnected, setIsConnected] = useState(false); // Correctly managing connection state
-  const [buttonCount, setButtonCount] = useState(0);
-  const [macAddress, setMacAddress] = useState(""); // MAC address of the Bluetooth device
-  const [sentData, setSentData] = useState(""); // New state to store the sent data
-  const [show, setShow] = useState([]); // New state to store the sent data
   const [isHoldPressed, setIsHoldPressed] = useState(false);
+  const [isConnected, setIsConnected] = useState(false); // Correctly managing connection state
+  const [scanned, setScanned] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions();
+  const [device, setDevice] = useState(null);
+  const [hasPermissions, setHasPermissions] = useState(false);
+  const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [idFromQr, setIdFromQr] = useState(null);
   const [callBinary, setCallBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
   const [funcBinary, setFuncBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
   const [arrSentData, setArrSentData] = useState([
@@ -38,59 +38,39 @@ export default function App() {
     "0x00",
   ]);
 
-  // console.log(isConnected);
-  // console.log(isHoldPressed);
-  // console.log(callBinary);
-  // console.log(funcBinary);
-  // console.log(arrSentData);
+  console.log("callBinary", callBinary);
+  console.log("funcBinary", funcBinary);
+  console.log("device", device);
+  // const [maserviceUUIDcId, setserviceUUID] = useState("");
+  // const [characteristicUUID, setcharacteristicUUID] = useState("");
+
+  // const nameEsp = "ESP32 QUYET";
+  // const idEsp = "F0:24:F9:43:45:6E";
+
+  const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+  const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+  // console.log("isConnected, idqr", isConnected, idFromQr);
+
+  const blemanager = new BleManager();
 
   useEffect(() => {
-    if (isConnected) {
-      // Chuyển mảng nhị phân thành chuỗi nhị phân
-      const binaryString = callBinary.join("");
-      // Chuyển chuỗi nhị phân thành số thập phân rồi chuyển thành thập lục phân
-      let hexValue = parseInt(binaryString, 2).toString(16).toUpperCase();
-      hexValue = hexValue.padStart(2, "0"); // Đảm bảo đủ 2 ký tự
-      const formattedHexValue = `0x${hexValue}`;
-      console.log(`SentCall: ${formattedHexValue}`);
-
-      // Cập nhật arrSentData
-      setArrSentData((prevState) => {
-        const newState = [...prevState];
-        newState[0] = formattedHexValue;
-        newState[1] = "0x00";
-        newState[2] = "0x00";
-        return newState;
-      });
-    }
+    console.log("callBinaryfect");
+    sendData();
   }, [callBinary]);
 
   useEffect(() => {
-    if (isConnected) {
-      // Chuyển mảng nhị phân thành chuỗi nhị phân
-      const binaryString = funcBinary.join("");
-      // Chuyển chuỗi nhị phân thành số thập phân rồi chuyển thành thập lục phân
-      let hexValue = parseInt(binaryString, 2).toString(16).toUpperCase();
-      hexValue = hexValue.padStart(2, "0"); // Đảm bảo đủ 2 ký tự
-      const formattedHexValue = `0x${hexValue}`;
-      console.log(`SentFunction: ${formattedHexValue}`);
-
-      // Gửi dữ liệu Bluetooth
-      setArrSentData((prevState) => {
-        const newState = [...prevState];
-        newState[1] = "0x00";
-        newState[2] = "0x00";
-        newState[3] = formattedHexValue;
-        return newState;
-      });
+    if (idFromQr !== null && device !== null) {
+      saveLastDevice(device, idFromQr);
     }
-  }, [funcBinary]);
+  }, [idFromQr]);
 
   useEffect(() => {
-    if (isConnected) {
-      senDataToBluetooth();
-    }
-  }, [arrSentData]);
+    requestPermissions();
+    // return () => {
+    //   // Cleanup BLE manager when the component unmounts
+    //   blemanager.destroy();
+    // };
+  }, []);
 
   useEffect(() => {
     if (isConnected) {
@@ -100,147 +80,6 @@ export default function App() {
     }
   }, [isHoldPressed]);
 
-  //ket noi voi thiet bij truoc do da ket noi
-  const saveLastDevice = async (data) => {
-    try {
-      await AsyncStorage.setItem("LAST_DEVICE", data);
-      console.log("Last connected device saved:", data);
-    } catch (error) {
-      console.error("Error saving last connected device:", error);
-    }
-  };
-
-  const getLastDevice = async () => {
-    try {
-      console.log("Fetching last connected device");
-      const lastDevice = await AsyncStorage.getItem("LAST_DEVICE");
-      return lastDevice;
-    } catch (error) {
-      console.error("Error fetching last connected device:", error);
-      return null;
-    }
-  };
-
-  //nut ket noi lai
-  const handleReconnect = async () => {
-    console.log("Reconnecting to last device");
-    const lastDevice = await getLastDevice();
-    console.log(`vao chua ${lastDevice}`);
-    const parsedData = JSON.parse(lastDevice);
-    if (parsedData) {
-      connectToDevice(parsedData.name);
-      setCameraEnabled(false); // Turn off camera after scan
-      setMacAddress(parsedData.name); // Assuming QR data contains mac address
-      setButtonCount(parsedData.count);
-      setShow(parsedData.show);
-      setIdDeviceAddPass(parsedData); // Save QR data
-    } else {
-      Alert.alert("No device", "No previously connected device found.");
-    }
-  };
-
-  // //âm thanh
-  let soundObject = null;
-
-  // Hàm phát âm thanh
-  const playSound = async () => {
-    try {
-      if (soundObject === null) {
-        soundObject = new Audio.Sound();
-        await soundObject.loadAsync(require("./assets/Audio/button.mp3"));
-      }
-      await soundObject.replayAsync();
-    } catch (error) {
-      console.error("Error playing sound:", error);
-    }
-  };
-  // console.log(isHoldPressed);
-  // console.log(show);
-  // console.log(sentData);
-
-  // Bluetooth connection logic
-  const requestBluetoothPermissions = async () => {
-    const { PermissionsAndroid, Platform } = require("react-native");
-    if (Platform.OS === "android" && Platform.Version >= 31) {
-      try {
-        const granted = await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-        ]);
-        return (
-          granted[PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN] ===
-            PermissionsAndroid.RESULTS.GRANTED &&
-          granted[PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT] ===
-            PermissionsAndroid.RESULTS.GRANTED &&
-          granted[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] ===
-            PermissionsAndroid.RESULTS.GRANTED
-        );
-      } catch (err) {
-        console.warn(err);
-        return false;
-      }
-    } else {
-      return true;
-    }
-  };
-
-  const initializeBluetooth = async () => {
-    const hasPermissions = await requestBluetoothPermissions();
-    if (!hasPermissions) {
-      Alert.alert(
-        "Permissions required",
-        "Please grant Bluetooth permissions to use this feature."
-      );
-      return false;
-    }
-    return true;
-  };
-
-  // Removed the scanForDevices function
-  // const connectToDevice = async (macAddress) => {
-  //   try {
-  //     // console.log(macAddress);
-  //     const connected = await RNBluetoothClassic.connectToDevice(macAddress);
-  //     if (connected) {
-  //       // Alert.alert(
-  //       //   "Connected",
-  //       //   `Connected to device with MAC address: ${macAddress}`
-  //       // );
-  //       setIsConnected(true); // Properly using setIsConnected
-  //     } else {
-  //       Alert.alert(
-  //         "Connection failed",
-  //         `Failed to connect to device with MAC address: ${macAddress}`
-  //       );
-  //     }
-  //   } catch (error) {
-  //     console.error("Connection Error:", error);
-  //     Alert.alert("Error", "An error occurred while connecting to the device");
-  //   }
-  // };
-
-  const connectToDevice = async (macAddress, parsedData) => {
-    try {
-      console.log(`$da ton tai${parsedData}`);
-      const connected = await RNBluetoothClassic.connectToDevice(macAddress);
-      if (connected) {
-        setIsConnected(true);
-        if (parsedData) {
-          await saveLastDevice(parsedData); // Lưu thông tin thiết bị đã kết nối
-        }
-      } else {
-        Alert.alert(
-          "Connection failed",
-          `Failed to connect to device with MAC address: ${macAddress}`
-        );
-      }
-    } catch (error) {
-      console.error("Connection Error:", error);
-      Alert.alert("Error", "Turn on bluetooth and pair then try again");
-    }
-  };
-
   const handlePermissionRequest = () => {
     requestPermission().then(() => {
       if (permission.granted) {
@@ -248,87 +87,273 @@ export default function App() {
       }
     });
   };
-
   const handleBarcodeScanned = ({ type, data }) => {
     setScanned(true);
     try {
-      // console.log(data);
       const parsedData = JSON.parse(data);
-      setIdDeviceAddPass(parsedData); // Save QR data
-      setCameraEnabled(false); // Turn off camera after scan
-      setMacAddress(parsedData.name); // Assuming QR data contains mac address
-      connectToDevice(parsedData.name, data); // Connect directly using MAC address from QR code
-      setButtonCount(parsedData.count);
-      setShow(parsedData.show);
-      // console.log(show);
+      console.log("quet ra dc ru Qr", parsedData);
+      if (parsedData) {
+        setIdFromQr(parsedData); // Save QR data
+        setCameraEnabled(false); // Turn off camera after scan
+        scanForDevices(parsedData); // Connect directly using MAC address from QR code
+      } else {
+        Alert.alert("Error", "parsedData ko ton tai");
+      }
     } catch (error) {
       Alert.alert("Error", "Invalid QR Code data");
     }
   };
+
+  useEffect(() => {
+    requestPermissions();
+    return () => {
+      // Cleanup BLE manager when the component unmounts
+      blemanager.destroy();
+    };
+  }, []);
+  //Phan Quyen
+  const requestPermissions = async () => {
+    if (Platform.OS === "android") {
+      if ((ExpoDevice.platformApiLevel ?? -1) < 31) {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          {
+            title: "Location Permission",
+            message: "Bluetooth Low Energy requires Location",
+            buttonPositive: "OK",
+          }
+        );
+        setHasPermissions(granted === PermissionsAndroid.RESULTS.GRANTED);
+      } else {
+        const bluetoothScanPermission = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+          {
+            title: "Bluetooth Permission",
+            message: "This app requires Bluetooth Scan Permission",
+            buttonPositive: "OK",
+          }
+        );
+        const bluetoothConnectPermission = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+          {
+            title: "Bluetooth Permission",
+            message: "This app requires Bluetooth Connect Permission",
+            buttonPositive: "OK",
+          }
+        );
+        const fineLocationPermission = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          {
+            title: "Location Permission",
+            message: "Bluetooth Low Energy requires Location",
+            buttonPositive: "OK",
+          }
+        );
+        setHasPermissions(
+          bluetoothScanPermission === PermissionsAndroid.RESULTS.GRANTED &&
+            bluetoothConnectPermission === PermissionsAndroid.RESULTS.GRANTED &&
+            fineLocationPermission === PermissionsAndroid.RESULTS.GRANTED
+        );
+      }
+    } else {
+      setHasPermissions(true); // Trên iOS, quyền đã được cấp mặc định
+    }
+  };
+  //Scan thiet bi
+  const scanForDevices = (data) => {
+    console.log("Scanning for devices...", data.name);
+    blemanager.startDeviceScan(null, null, (error, device) => {
+      console.log("Scanning...123");
+      if (error) {
+        console.log("LOI", error);
+        return;
+      }
+      console.log("device", device);
+      if (
+        device.name === data.name &&
+        device.id === data.id &&
+        device.isConnectable
+      ) {
+        console.log("Found device", device);
+        setDevice(device);
+        blemanager.stopDeviceScan();
+        connectToDevice(device.id);
+      }
+    });
+  };
+
+  const connectToDevice = async (deviceId) => {
+    if (deviceId === "F0:24:F9:43:45:6E") {
+      console.log("trung id");
+    } else {
+      console.log("ko trung id ");
+      // alert("Chưa có kết nối trước đó, Hãy quét QR để kết nối");
+    }
+    try {
+      const deviceConnect = await blemanager.connectToDevice(deviceId);
+      const services =
+        await deviceConnect.discoverAllServicesAndCharacteristics(); // Lấy tất cả dịch vụ và đặc điểm của thiết bị
+      setIsConnected(true);
+      console.log("services", services);
+      if (services) {
+        console.log("services123");
+        setIsConnected(true);
+      } else {
+        Alert.alert(
+          "Connection failed",
+          `Failed to connect to device with MAC address`
+        );
+      }
+    } catch (error) {
+      console.log("Connection failed", error);
+    }
+  };
+  const sendData = async () => {
+    console.log("toi day chua sendata");
+    if (!device) {
+      console.log("No device connected!");
+      return;
+    }
+    connectToDevice(device.id);
+    try {
+      const message = "H";
+      const encodedMessage = Buffer.from(message, "utf-8").toString("base64");
+      await device.writeCharacteristicWithResponseForService(
+        SERVICE_UUID,
+        CHARACTERISTIC_UUID,
+        encodedMessage
+      );
+      console.log(`Message sent: ${message}`);
+    } catch (error) {
+      console.log(`Error sending message: ${error.message}`);
+    }
+  };
+  //Save last device connected
+  const saveLastDevice = async (device, data) => {
+    try {
+      const jsonServices = JSON.stringify(device);
+      await AsyncStorage.setItem("LAST_DEVICE_ESP", jsonServices);
+      console.log("Last connected device saved:", jsonServices);
+      console.log("data", data);
+      const jsonData = JSON.stringify(data);
+      await AsyncStorage.setItem("ID_FROM_QR", jsonData);
+      console.log("Last connected device saved:", jsonData);
+    } catch (error) {
+      console.error("Error saving last connected device:", error);
+    }
+  };
+  //Get last device connected
+  const getLastDevice = async () => {
+    try {
+      console.log("Fetching last connected device");
+      const lastDevice = await AsyncStorage.getItem("LAST_DEVICE_ESP");
+      const parsedData = JSON.parse(lastDevice);
+
+      console.log("Fetching last connected device");
+      const lastIdQr = await AsyncStorage.getItem("ID_FROM_QR");
+      const parsedlastIdQr = JSON.parse(lastIdQr);
+      setIdFromQr(parsedlastIdQr);
+
+      return parsedData;
+    } catch (error) {
+      console.error("Error fetching last connected device:", error);
+      return null;
+    }
+  };
+  const handleReconnect = async () => {
+    console.log("Reconnecting to last device");
+    const lastDevice = await getLastDevice();
+    if (lastDevice) {
+      console.log("Last device found", lastDevice);
+      connectToDevice(lastDevice.id);
+    } else {
+      Alert.alert("No device", "No previously connected device found.");
+    }
+  };
+
+  //nhan nut gui du lieu
+  const handleButtonPress = (buttonNumber) => {
+    console.log("buttonNumber");
+    // playSound(); // Play sound when button is pressed
+    if (isConnected) {
+      const numberFloor = 7; //0 đến 7 là thành 8 tầng
+      setCallBinary((prev) => {
+        const newCallBinary = [...prev];
+        for (let i = 0; i < newCallBinary.length; i++) {
+          // newCallBinary[numberFloor - buttonNumber] = 1;
+          const index = numberFloor - buttonNumber;
+          if (i === index) {
+            newCallBinary[i] = 1;
+          } else {
+            newCallBinary[i] = 0;
+          }
+        }
+        return newCallBinary;
+      });
+
+      // setTimeout(() => {
+      //   setCallBinary((prevState) => {
+      //     const newState = [...prevState];
+      //     newState[numberFloor - buttonNumber] = 0; // Đặt lại giá trị về 0 sau 1 giây
+      //     return newState;
+      //   });
+      // }, 1000);
+    } else {
+      Alert.alert(
+        "Bluetooth not connected",
+        "Please connect to a Bluetooth device first."
+      );
+    }
+  };
+
   const handleToogle = () => {
     // playSound();
     setIsHoldPressed((e) => !e);
   };
 
-  const senDataToBluetooth = () => {
-    RNBluetoothClassic.writeToDevice(macAddress, arrSentData)
-      .then(() => {
-        console.log(`Data sent successfully ${arrSentData}`);
-        setSentData(arrSentData);
-      })
-      .catch((error) => {
-        console.error("Send Error:", error);
-        Alert.alert("Error", "Failed to send data");
-      });
-  };
-  const handleButtonPress = (buttonNumber) => {
-    playSound(); // Play sound when button is pressed
-    if (isConnected) {
-      const numberFloor = 7; //0 đến 7 là thành 8 tầng
-      setCallBinary((prev) => {
-        const newCallBinary = [...prev];
-        newCallBinary[numberFloor - buttonNumber] = 1;
-        return newCallBinary;
-      });
-
-      setTimeout(() => {
-        setCallBinary((prevState) => {
-          const newState = [...prevState];
-          newState[numberFloor - buttonNumber] = 0; // Đặt lại giá trị về 0 sau 1 giây
-          return newState;
-        });
-      }, 1000);
-    } else {
-      Alert.alert(
-        "Bluetooth not connected",
-        "Please connect to a Bluetooth device first."
-      );
-    }
-  };
   //function button open and close
   const handleButtonFunctionPress = (buttonFunction) => {
-    playSound(); // Play sound when button is pressed
+    // playSound(); // Play sound when button is pressed
     if (isConnected) {
       setFuncBinary((prev) => {
         const newCallBinary = [...prev];
+        for (let i = 0; i < newCallBinary.length; i++) {
+          newCallBinary[i] =
+            i === 5 ? newCallBinary[i] : i === buttonFunction ? 1 : 0;
+        }
         newCallBinary[buttonFunction] = 1;
         return newCallBinary;
       });
 
-      setTimeout(() => {
-        setFuncBinary((prevState) => {
-          const newState = [...prevState];
-          newState[buttonFunction] = 0; // Đặt lại giá trị về 0 sau 1 giây
-          return newState;
-        });
-      }, 500);
-    } else {
-      Alert.alert(
-        "Bluetooth not connected",
-        "Please connect to a Bluetooth device first."
-      );
+      // setTimeout(() => {
+      //   setFuncBinary((prevState) => {
+      //     const newState = [...prevState];
+      //     newState[buttonFunction] = 0; // Đặt lại giá trị về 0 sau 1 giây
+      //     return newState;
+      //   });
+      // }, 500);
     }
   };
+
+  // const sendData = async (arayData) => {
+  //   if (device) {
+  //     // Dữ liệu gửi dưới dạng mảng byte (Ví dụ: [0x01, 0x02, 0x03, 0x04])
+  //     const dataToSend = arayData; // mảng byte
+  //     try {
+  //       await device.writeCharacteristicWithResponseForService(
+  //         serviceUUID,
+  //         characteristicUUID,
+  //         dataToSend.toString("base64") // Dữ liệu cần mã hóa thành base64
+  //       );
+  //       console.log("Data sent successfully");
+  //     } catch (error) {
+  //       console.log("Error sending data:", error);
+  //     }
+  //   } else {
+  //     console.log("Device not connected");
+  //   }
+  // };
+
   if (!cameraEnabled) {
     return (
       <>
@@ -353,19 +378,21 @@ export default function App() {
             }}
           />
           <View style={styles.container}>
-            {idDeviceAddPass ? (
+            {idFromQr || device ? (
               <View style={styles.resultContainer}>
                 {isConnected ? (
                   <View style={styles.container}>
                     <View style={styles.buttonContainer}>
-                      {Array.from({ length: buttonCount }, (_, i) => (
+                      {Array.from({ length: idFromQr.numberFloor }, (_, i) => (
                         <View style={styles.buttonCallContainer} key={i}>
                           <TouchableOpacity
                             style={styles.buttonCall}
                             key={i}
                             onPress={() => handleButtonPress(i)}
                           >
-                            <Text style={styles.buttonText}>{show[i]}</Text>
+                            <Text style={styles.buttonText}>
+                              {idFromQr.display[i]}
+                            </Text>
                           </TouchableOpacity>
                         </View>
                       ))}
@@ -458,20 +485,20 @@ export default function App() {
         </ImageBackground>
       </>
     );
+  } else {
+    return (
+      <View style={styles.container}>
+        <CameraView
+          style={styles.camera}
+          facing="back"
+          onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+        />
+        {scanned && (
+          <Button title="Scan Again" onPress={() => setScanned(false)} />
+        )}
+      </View>
+    );
   }
-
-  return (
-    <View style={styles.container}>
-      <CameraView
-        style={styles.camera}
-        facing="back"
-        onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
-      />
-      {scanned && (
-        <Button title="Scan Again" onPress={() => setScanned(false)} />
-      )}
-    </View>
-  );
 }
 
 const styles = StyleSheet.create({
