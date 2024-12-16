@@ -58,7 +58,46 @@ export default function App() {
       Alert.alert("Error", "Invalid QR Code data");
     }
   };
-
+  //save trang thai quet
+  useEffect(() => {
+    if (idFromQr !== null && isConnected) {
+      saveLastDevice(idFromQr);
+    }
+  }, [idFromQr]);
+  //Save last device connected
+  const saveLastDevice = async (data) => {
+    try {
+      const jsonData = JSON.stringify(data);
+      await AsyncStorage.setItem("ID_FROM_QR", jsonData);
+      console.log("Last connected device saved:", jsonData);
+    } catch (error) {
+      console.error("Error saving last connected device:", error);
+    }
+  };
+  //Reconnect to last device
+  const handleReconnect = async () => {
+    console.log("Reconnecting to last device");
+    const lastDevice = await getLastDevice();
+    if (lastDevice) {
+      console.log("Last device found", lastDevice);
+      connectToPeripheral(lastDevice);
+    } else {
+      Alert.alert("No device", "No previously connected device found.");
+    }
+  };
+  //Get last device connected
+  const getLastDevice = async () => {
+    try {
+      console.log("Fetching last connected device");
+      const lastIdQr = await AsyncStorage.getItem("ID_FROM_QR");
+      const parsedlastIdQr = JSON.parse(lastIdQr);
+      setIdFromQr(parsedlastIdQr);
+      return parsedlastIdQr;
+    } catch (error) {
+      console.error("Error fetching last connected device:", error);
+      return null;
+    }
+  };
   //Sử lý nút Gọi
   const handleButtonPress = (buttonNumber) => {
     console.log("buttonNumber");
@@ -96,7 +135,7 @@ export default function App() {
   };
 
   // Hàm quét thiết bị
-  const scanForPeripherals = () => {
+  const scanForPeripherals = (parsedData) => {
     console.log("Bắt đầu quét thiết bị BLE...");
     setDevices([]); // Xóa danh sách thiết bị cũ
 
@@ -106,10 +145,7 @@ export default function App() {
         return;
       }
 
-      if (
-        device.localName === "ESP32 QUYET" &&
-        device.id === "F0:24:F9:43:45:6E"
-      ) {
+      if (device.localName === parsedData.name && device.id === parsedData.id) {
         console.log("Tìm thấy thiết bị:", device.localName);
         connectToPeripheral(device); // Kết nối thiết bị ngay khi tìm thấy
         bleManager.stopDeviceScan();
@@ -326,7 +362,7 @@ export default function App() {
                 <View>
                   <TouchableOpacity
                     style={styles.reconnectButton}
-                    // onPress={handleReconnect}
+                    onPress={handleReconnect}
                   >
                     <Text style={styles.reconnectButtonText}>KẾT NỐI LẠI</Text>
                   </TouchableOpacity>
