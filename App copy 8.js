@@ -1,4 +1,9 @@
-import React, { useState, useEffect } from "react";
+import { BleManager } from "react-native-ble-plx";
+import { Buffer } from "buffer";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { PermissionsAndroid, Platform } from "react-native";
+import * as ExpoDevice from "expo-device";
+
 import {
   Button,
   View,
@@ -10,29 +15,88 @@ import {
   ImageBackground,
   StatusBar,
 } from "react-native";
-import { BleManager } from "react-native-ble-plx";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
+import { Audio } from "expo-av";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const bleManager = new BleManager(); // Tạo đối tượng BLE Manager
-
 export default function App() {
-  const [devices, setDevices] = useState([]); // Lưu danh sách các thiết bị tìm thấy
-  const [isConnected, setIsConnected] = useState(false); // Theo dõi trạng thái kết nối
-  const [button, setButton] = useState(false); // Biến theo dõi trạng thái button
-  const [connectedDevice, setConnectedDevice] = useState(null); // Lưu thiết bị đã kết nối
+  const [isHoldPressed, setIsHoldPressed] = useState(false);
+  const [isConnected, setIsConnected] = useState(false); // Correctly managing connection state
+  const [scanned, setScanned] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions();
+  // const [connectedDevice, setConnectedDevice] = useState(null); // Lưu thiết bị đã kết nối
+  const connectedDevice = useRef(null); // Sử dụng useRef để lưu thiết bị đã kết nối
+  const [hasPermissions, setHasPermissions] = useState(false);
+  const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [idFromQr, setIdFromQr] = useState(null);
+  const [callBinary, setCallBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
+  const [funcBinary, setFuncBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
+  const [button, setButton] = useState(false);
+  const [arrSentData, setArrSentData] = useState([
+    "0x00",
+    "0x00",
+    "0x00",
+    "0x00",
+  ]);
+
+  // const [maserviceUUIDcId, setserviceUUID] = useState("");
+  // const [characteristicUUID, setcharacteristicUUID] = useState("");
+  // const nameEsp = "ESP32 QUYET";
+  // const idEsp = "F0:24:F9:43:45:6E";
+  console.log("idFromQr", idFromQr);
+  console.log("connectedDevice hang dau", connectedDevice);
+
   const serviceUUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
   const characteristicUUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
   const value = "SGVsbG87"; // Dữ liệu cần gửi (ở định dạng base64)
-  const [cameraEnabled, setCameraEnabled] = useState(false);
-  const [idFromQr, setIdFromQr] = useState(null);
-  const [permission, requestPermission] = useCameraPermissions();
-  const [scanned, setScanned] = useState(false);
-  const [isHoldPressed, setIsHoldPressed] = useState(false);
-  const [callBinary, setCallBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
-  const [funcBinary, setFuncBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
-  const [dataSend, setDataSend] = useState([]);
+  // console.log("isConnected, idqr", isConnected, idFromQr);
+  // Log when the component re-renders
+  console.log("Component re-rendered");
+  const bleManager = new BleManager();
+  console.log("connectedDevice dau tienn", connectedDevice);
+
+  //Gửi dữ lieuj di dua vao callBinary
+  // useEffect(() => {
+  //   if (callBinary.length !== 0 && isConnected && connectedDevice) {
+  //     console.log("callBinaryfect");
+  //     writeDataToDevice(serviceUUID, characteristicUUID, value);
+  //   }
+  //   // setCallBinary([0, 0, 0, 0, 0, 0, 0, 0]);
+  // }, [callBinary]);
+
+  // Test useEffect theo dõi biến button
+  // useEffect(() => {
+  //   console.log("button, isconneced, connecDevice", button, isConnected);
+  //   if (button && isConnected && connectedDevice) {
+  //     console.log("gửi di tu efect");
+  //     writeDataToDevice(serviceUUID, characteristicUUID, value);
+  //   } else {
+  //     console.log("ko thoa dieu kien");
+  //   }
+  // }, [button, isConnected, connectedDevice]); // Theo dõi button và trạng thái kết nối
+
+  // useEffect(() => {
+  //   if (idFromQr !== null && connectedDevice !== null) {
+  //     saveLastDevice(connectedDevice, idFromQr);
+  //   }
+  // }, [idFromQr]);
+
+  useEffect(() => {
+    requestPermissions();
+    return () => {
+      // Cleanup BLE manager when the component unmounts
+      bleManager.destroy();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isConnected) {
+      let newState = [...funcBinary];
+      newState[5] = isHoldPressed ? 1 : 0;
+      setFuncBinary(newState);
+    }
+  }, [isHoldPressed]);
 
   const handlePermissionRequest = () => {
     requestPermission().then(() => {
@@ -58,8 +122,181 @@ export default function App() {
       Alert.alert("Error", "Invalid QR Code data");
     }
   };
+  //Phan Quyen
+  const requestPermissions = async () => {
+    if (Platform.OS === "android") {
+      if ((ExpoDevice.platformApiLevel ?? -1) < 31) {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          {
+            title: "Location Permission",
+            message: "Bluetooth Low Energy requires Location",
+            buttonPositive: "OK",
+          }
+        );
+        setHasPermissions(granted === PermissionsAndroid.RESULTS.GRANTED);
+      } else {
+        const bluetoothScanPermission = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+          {
+            title: "Bluetooth Permission",
+            message: "This app requires Bluetooth Scan Permission",
+            buttonPositive: "OK",
+          }
+        );
+        const bluetoothConnectPermission = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+          {
+            title: "Bluetooth Permission",
+            message: "This app requires Bluetooth Connect Permission",
+            buttonPositive: "OK",
+          }
+        );
+        const fineLocationPermission = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          {
+            title: "Location Permission",
+            message: "Bluetooth Low Energy requires Location",
+            buttonPositive: "OK",
+          }
+        );
+        setHasPermissions(
+          bluetoothScanPermission === PermissionsAndroid.RESULTS.GRANTED &&
+            bluetoothConnectPermission === PermissionsAndroid.RESULTS.GRANTED &&
+            fineLocationPermission === PermissionsAndroid.RESULTS.GRANTED
+        );
+      }
+    } else {
+      setHasPermissions(true); // Trên iOS, quyền đã được cấp mặc định
+    }
+  };
+  //Scan thiet bi
+  const scanForPeripherals = useCallback(() => {
+    console.log("Bắt đầu quét thiết bị BLE...");
+    bleManager.startDeviceScan(null, null, (error, device) => {
+      if (error) {
+        console.error("Lỗi khi quét thiết bị:", error);
+        return;
+      }
 
-  //Sử lý nút Gọi
+      if (device.localName === "ESP32 QUYET") {
+        console.log("Tìm thấy thiết bị:", device.localName);
+        bleManager.stopDeviceScan();
+        // setConnectedDevice((prevDevice) => {
+        //   if (device) {
+        //     return device;
+        //   }
+        //   return prevDevice; // Không ghi đè khi không có thiết bị mới
+        // });
+        // setIsConnected(true);
+        connectToPeripheral(device);
+      }
+    });
+  }, []);
+
+  // Hàm kết nối với thiết bị
+  const connectToPeripheral = useCallback(async (device) => {
+    console.log(
+      `Đang kết nối với thiết bị: ${device.localName} (${device.id})`
+    );
+    try {
+      const connectedDeviceNew = await bleManager.connectToDevice(device.id);
+      console.log("Đã kết nối thành công:", connectedDeviceNew);
+      await connectedDeviceNew.discoverAllServicesAndCharacteristics(); // Khám phá các dịch vụ
+      connectedDevice.current = connectedDeviceNew; // Lưu thiết bị vào ref
+      setIsConnected(true);
+      // Ensure connectedDevice is valid before setting state
+      if (servers) {
+        console.log("Updating state with connected device", connectedDevice);
+      } else {
+        console.error("Connected device is null or undefined.");
+      }
+    } catch (error) {
+      console.error("Lỗi khi kết nối với thiết bị:", error);
+    }
+  }, []);
+
+  // Hàm gửi dữ liệu
+  const writeDataToDevice = async (serviceUUID, characteristicUUID, value) => {
+    console.log("writeDataToDevice", connectedDevice);
+    if (!connectedDevice) {
+      console.log("Chưa kết nối với thiết bị.");
+      return;
+    }
+
+    try {
+      const isAConnected = await connectedDevice.isConnected();
+      console.log("isConnected", isAConnected);
+      if (!isAConnected) {
+        console.log(`Device ${connectedDevice.id} is not connected`);
+        return;
+      }
+
+      console.log("Sending data...");
+      await connectedDevice.writeCharacteristicWithResponseForService(
+        serviceUUID,
+        characteristicUUID,
+        value
+      );
+      console.log("Gửi dữ liệu thành công.");
+    } catch (error) {
+      console.error("Lỗi khi gửi dữ liệu:", error);
+    }
+  };
+
+  // Test useEffect theo dõi biến button
+  // useEffect(() => {
+  //   if (button && isConnected && connectedDevice) {
+  //     writeDataToDevice(serviceUUID, characteristicUUID, value);
+  //     // Reset trạng thái button sau khi gửi xong
+  //     setButton(false);
+  //   }
+  // }, [button]); // Theo dõi button và trạng thái kết nối
+
+  //Save last device connected
+  const saveLastDevice = async (device, data) => {
+    try {
+      const jsonServices = JSON.stringify(device);
+      await AsyncStorage.setItem("LAST_DEVICE_ESP", jsonServices);
+      console.log("Last connected device saved:", jsonServices);
+      console.log("data", data);
+      const jsonData = JSON.stringify(data);
+      await AsyncStorage.setItem("ID_FROM_QR", jsonData);
+      console.log("Last connected device saved:", jsonData);
+    } catch (error) {
+      console.error("Error saving last connected device:", error);
+    }
+  };
+  //Get last device connected
+  const getLastDevice = async () => {
+    try {
+      console.log("Fetching last connected device");
+      const lastDevice = await AsyncStorage.getItem("LAST_DEVICE_ESP");
+      const parsedData = JSON.parse(lastDevice);
+
+      console.log("Fetching last connected device");
+      const lastIdQr = await AsyncStorage.getItem("ID_FROM_QR");
+      const parsedlastIdQr = JSON.parse(lastIdQr);
+      setIdFromQr(parsedlastIdQr);
+
+      return parsedData;
+    } catch (error) {
+      console.error("Error fetching last connected device:", error);
+      return null;
+    }
+  };
+  const handleReconnect = async () => {
+    console.log("Reconnecting to last device");
+    const lastDevice = await getLastDevice();
+    if (lastDevice) {
+      console.log("Last device found", lastDevice);
+      connectToPeripheral(lastDevice.id);
+    } else {
+      Alert.alert("No device", "No previously connected device found.");
+    }
+  };
+
+  //nhan nut gui du lieu
   const handleButtonPress = (buttonNumber) => {
     console.log("buttonNumber");
     // playSound(); // Play sound when button is pressed
@@ -76,10 +313,9 @@ export default function App() {
             newCallBinary[i] = 0;
           }
         }
-        console.log("newCallBinary", newCallBinary);
-        setDataSend((e) => [...e, newCallBinary]);
         return newCallBinary;
       });
+
       // setTimeout(() => {
       //   setCallBinary((prevState) => {
       //     const newState = [...prevState];
@@ -95,105 +331,47 @@ export default function App() {
     }
   };
 
-  // Hàm quét thiết bị
-  const scanForPeripherals = () => {
-    console.log("Bắt đầu quét thiết bị BLE...");
-    setDevices([]); // Xóa danh sách thiết bị cũ
-
-    bleManager.startDeviceScan(null, null, (error, device) => {
-      if (error) {
-        console.error("Lỗi khi quét thiết bị:", error);
-        return;
-      }
-
-      if (
-        device.localName === "ESP32 QUYET" &&
-        device.id === "F0:24:F9:43:45:6E"
-      ) {
-        console.log("Tìm thấy thiết bị:", device.localName);
-        connectToPeripheral(device); // Kết nối thiết bị ngay khi tìm thấy
-        bleManager.stopDeviceScan();
-      }
-    });
+  const handleToogle = () => {
+    // playSound();
+    setIsHoldPressed((e) => !e);
   };
 
-  // Hàm kết nối với thiết bị
-  const connectToPeripheral = async (device) => {
-    console.log(
-      `Đang kết nối với thiết bị: ${device.localName} (${device.id})`
-    );
-    try {
-      const connectedDevice = await bleManager.connectToDevice(device.id);
-      console.log("Đã kết nối thành công:", connectedDevice);
-      setConnectedDevice(connectedDevice); // Lưu lại thiết bị đã kết nối
-      setIsConnected(true);
-      await connectedDevice.discoverAllServicesAndCharacteristics(); // Khám phá các dịch vụ
-      console.log("Khám phá dịch vụ thành công.");
-    } catch (error) {
-      console.error("Lỗi khi kết nối với thiết bị:", error);
+  //function button open and close
+  const handleButtonFunctionPress = (buttonFunction) => {
+    // playSound(); // Play sound when button is pressed
+    if (isConnected) {
+      setFuncBinary((prev) => {
+        const newCallBinary = [...prev];
+        for (let i = 0; i < newCallBinary.length; i++) {
+          newCallBinary[i] =
+            i === 5 ? newCallBinary[i] : i === buttonFunction ? 1 : 0;
+        }
+        newCallBinary[buttonFunction] = 1;
+        return newCallBinary;
+      });
     }
   };
 
-  // Hàm gửi dữ liệu
-  const writeDataToDevice = async (serviceUUID, characteristicUUID, value) => {
-    if (!connectedDevice) {
-      console.log("Chưa kết nối với thiết bị.");
-      return;
-    }
-    console.log("mang chuan bị de gui du lieu di", connectedDevice);
-    try {
-      await connectedDevice.writeCharacteristicWithResponseForService(
-        serviceUUID,
-        characteristicUUID,
-        value
-      );
-      console.log("Gửi dữ liệu thành công.");
-    } catch (error) {
-      console.error("Lỗi khi gửi dữ liệu:", error);
-    }
-  };
-
-  // useEffect theo dõi biến button
-  useEffect(() => {
-    const sendData = async () => {
-      if (button && isConnected) {
-        await writeDataToDevice(serviceUUID, characteristicUUID, value);
-        // Reset trạng thái button sau khi gửi xong
-        setButton(false);
-      }
-    };
-
-    sendData(); // Gọi hàm sendData khi có sự thay đổi
-  }, [button, isConnected, callBinary]); // Theo dõi button và trạng thái kết nối
-
+  // //return test
   // return (
-  //   <>
-  //     <View style={{ flex: 1, padding: 20 }}>
-  //       <Button title="Quét thiết bị BLE" onPress={scanForPeripherals} />
+  //   <View style={{ flex: 1, padding: 20 }}>
+  //     <Button title="Quét thiết bị BLE" onPress={scanForPeripherals} />
 
-  //       {connected ? (
-  //         <Text style={{ marginVertical: 20 }}>
-  //           Đã kết nối với thiết bị BLE
-  //         </Text>
-  //       ) : (
-  //         <Text style={{ marginVertical: 20 }}>Chưa kết nối thiết bị</Text>
-  //       )}
+  //     {isConnected ? (
+  //       <Text style={{ marginVertical: 20 }}>Đã kết nối với thiết bị BLE</Text>
+  //     ) : (
+  //       <Text style={{ marginVertical: 20 }}>Chưa kết nối thiết bị</Text>
+  //     )}
 
-  //       <Button
-  //         title="Gửi dữ liệu"
-  //         onPress={() => setButton(true)}
-  //         disabled={!connected} // Chỉ gửi dữ liệu khi đã kết nối
-  //       />
-  //       <Button
-  //         title="Gửi dữ liệu trực tiếp"
-  //         onPress={() =>
-  //           writeDataToDevice(serviceUUID, characteristicUUID, value)
-  //         }
-  //         disabled={!connected} // Chỉ gửi dữ liệu khi đã kết nối
-  //       />
-  //     </View>
-  //   </>
+  //     <Button
+  //       title="Gửi dữ liệu"
+  //       onPress={() =>
+  //         writeDataToDevice(serviceUUID, characteristicUUID, value)
+  //       }
+  //     />
+  //   </View>
   // );
+
   if (!cameraEnabled) {
     return (
       <>
@@ -250,7 +428,7 @@ export default function App() {
                           },
                         ]}
                         key={"buttonhold"}
-                        // onPress={() => handleToogle()}
+                        onPress={() => handleToogle()}
                       >
                         <Text style={styles.buttonTextFunction}>HOLD</Text>
                       </TouchableOpacity>
@@ -266,14 +444,17 @@ export default function App() {
                             },
                           ]}
                           key={"buttonopen"}
-                          // onPress={() => handleButtonFunctionPress(6)}
+                          onPress={() => handleButtonFunctionPress(6)}
                         >
                           <Text style={styles.buttonTextFunction}>OPEN</Text>
                         </TouchableOpacity>
                       </View>
-                      <Button title="Efect" onPress={() => setButton(true)} />
                       <Button
-                        title="TrucTiep"
+                        title="Gui du lieu efect"
+                        onPress={() => setButton((e) => !e)}
+                      />
+                      <Button
+                        title="Gui du lieu trưc tiep"
                         onPress={() =>
                           writeDataToDevice(
                             serviceUUID,
@@ -292,7 +473,7 @@ export default function App() {
                             },
                           ]}
                           key={"buttonclose"}
-                          // onPress={() => handleButtonFunctionPress(7)}
+                          onPress={() => handleButtonFunctionPress(7)}
                         >
                           <Text style={styles.buttonTextFunction}>CLOSE</Text>
                         </TouchableOpacity>
@@ -326,7 +507,7 @@ export default function App() {
                 <View>
                   <TouchableOpacity
                     style={styles.reconnectButton}
-                    // onPress={handleReconnect}
+                    onPress={handleReconnect}
                   >
                     <Text style={styles.reconnectButtonText}>KẾT NỐI LẠI</Text>
                   </TouchableOpacity>

@@ -30,9 +30,6 @@ export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [isHoldPressed, setIsHoldPressed] = useState(false);
-  const [callBinary, setCallBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
-  const [funcBinary, setFuncBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
-  const [dataSend, setDataSend] = useState([]);
 
   const handlePermissionRequest = () => {
     requestPermission().then(() => {
@@ -58,43 +55,6 @@ export default function App() {
       Alert.alert("Error", "Invalid QR Code data");
     }
   };
-
-  //Sử lý nút Gọi
-  const handleButtonPress = (buttonNumber) => {
-    console.log("buttonNumber");
-    // playSound(); // Play sound when button is pressed
-    if (isConnected) {
-      const numberFloor = 7; //0 đến 7 là thành 8 tầng
-      setCallBinary((prev) => {
-        const newCallBinary = [...prev];
-        for (let i = 0; i < newCallBinary.length; i++) {
-          // newCallBinary[numberFloor - buttonNumber] = 1;
-          const index = numberFloor - buttonNumber;
-          if (i === index) {
-            newCallBinary[i] = 1;
-          } else {
-            newCallBinary[i] = 0;
-          }
-        }
-        console.log("newCallBinary", newCallBinary);
-        setDataSend((e) => [...e, newCallBinary]);
-        return newCallBinary;
-      });
-      // setTimeout(() => {
-      //   setCallBinary((prevState) => {
-      //     const newState = [...prevState];
-      //     newState[numberFloor - buttonNumber] = 0; // Đặt lại giá trị về 0 sau 1 giây
-      //     return newState;
-      //   });
-      // }, 1000);
-    } else {
-      Alert.alert(
-        "Bluetooth not connected",
-        "Please connect to a Bluetooth device first."
-      );
-    }
-  };
-
   // Hàm quét thiết bị
   const scanForPeripherals = () => {
     console.log("Bắt đầu quét thiết bị BLE...");
@@ -164,7 +124,7 @@ export default function App() {
     };
 
     sendData(); // Gọi hàm sendData khi có sự thay đổi
-  }, [button, isConnected, callBinary]); // Theo dõi button và trạng thái kết nối
+  }, [button, isConnected]); // Theo dõi button và trạng thái kết nối
 
   // return (
   //   <>
@@ -228,7 +188,7 @@ export default function App() {
                           <TouchableOpacity
                             style={styles.buttonCall}
                             key={i}
-                            onPress={() => handleButtonPress(i)}
+                            // onPress={() => handleButtonPress(i)}
                           >
                             <Text style={styles.buttonText}>
                               {idFromQr.display[i]}
