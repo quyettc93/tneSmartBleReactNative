@@ -14,6 +14,8 @@ import { BleManager } from "react-native-ble-plx";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Buffer } from "buffer";
+import { use } from "react";
 
 const bleManager = new BleManager(); // Tạo đối tượng BLE Manager
 
@@ -24,7 +26,7 @@ export default function App() {
   const [connectedDevice, setConnectedDevice] = useState(null); // Lưu thiết bị đã kết nối
   const serviceUUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
   const characteristicUUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-  const value = "SGVsbG87"; // Dữ liệu cần gửi (ở định dạng base64)
+
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [idFromQr, setIdFromQr] = useState(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -33,7 +35,7 @@ export default function App() {
   const [callBinary, setCallBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
   const [funcBinary, setFuncBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
   const [dataSend, setDataSend] = useState([]);
-
+  console.log("Kiem tra", dataSend);
   const handlePermissionRequest = () => {
     requestPermission().then(() => {
       if (permission.granted) {
@@ -98,41 +100,26 @@ export default function App() {
       return null;
     }
   };
-  //Sử lý nút Gọi
-  const handleButtonPress = (buttonNumber) => {
-    console.log("buttonNumber");
-    // playSound(); // Play sound when button is pressed
-    if (isConnected) {
-      const numberFloor = 7; //0 đến 7 là thành 8 tầng
-      setCallBinary((prev) => {
-        const newCallBinary = [...prev];
-        for (let i = 0; i < newCallBinary.length; i++) {
-          // newCallBinary[numberFloor - buttonNumber] = 1;
-          const index = numberFloor - buttonNumber;
-          if (i === index) {
-            newCallBinary[i] = 1;
-          } else {
-            newCallBinary[i] = 0;
-          }
-        }
-        console.log("newCallBinary", newCallBinary);
-        setDataSend((e) => [...e, newCallBinary]);
-        return newCallBinary;
-      });
-      // setTimeout(() => {
-      //   setCallBinary((prevState) => {
-      //     const newState = [...prevState];
-      //     newState[numberFloor - buttonNumber] = 0; // Đặt lại giá trị về 0 sau 1 giây
-      //     return newState;
-      //   });
-      // }, 1000);
-    } else {
-      Alert.alert(
-        "Bluetooth not connected",
-        "Please connect to a Bluetooth device first."
-      );
-    }
+
+  // Hàm chuyển Mảng binary về HEx
+  const binaryArrayToHex = (binaryArray) => {
+    const binaryString = binaryArray.join("");
+    let hexValue = parseInt(binaryString, 2).toString(16).toUpperCase();
+    hexValue = hexValue.padStart(2, "0"); // Đảm bảo đủ 2 ký tự
+    const formattedHexValue = `0x${hexValue}`;
+    return formattedHexValue;
   };
+
+  // hàm chuyển mảng hex về base64
+  function hexArrayToBase64(hexArray) {
+    // Bước 1: Tạo Buffer từ mảng hex
+    const buffer = Buffer.from(hexArray);
+
+    // Bước 2: Chuyển Buffer thành Base64
+    const base64String = buffer.toString("base64");
+
+    return base64String;
+  }
 
   // Hàm quét thiết bị
   const scanForPeripherals = (parsedData) => {
@@ -177,6 +164,7 @@ export default function App() {
       return;
     }
     console.log("mang chuan bị de gui du lieu di", connectedDevice);
+    console.log(serviceUUID, characteristicUUID, value);
     try {
       await connectedDevice.writeCharacteristicWithResponseForService(
         serviceUUID,
@@ -192,16 +180,93 @@ export default function App() {
   // useEffect theo dõi biến button
   useEffect(() => {
     const sendData = async () => {
-      if (button && isConnected) {
+      console.log("dataSend useeffect", dataSend, dataSend[0]);
+      console.log("button", button);
+      let value = "SGVsbG87";
+      if (dataSend.length !== 0) {
+        value = hexArrayToBase64(dataSend);
+      }
+
+      // Gửi dữ liệu khi button = true / dataSend và đã kết nối
+      if ((button && isConnected) || (isConnected && dataSend.length !== 0)) {
+        console.log("Gửi dữ liệu... từ Efect");
         await writeDataToDevice(serviceUUID, characteristicUUID, value);
         // Reset trạng thái button sau khi gửi xong
         setButton(false);
       }
     };
-
     sendData(); // Gọi hàm sendData khi có sự thay đổi
-  }, [button, isConnected, callBinary]); // Theo dõi button và trạng thái kết nối
+  }, [button, isConnected, dataSend, isHoldPressed]); // Theo dõi button và trạng thái kết nối
 
+  //Sử lý nút Gọi
+  const handleButtonPress = (buttonNumber) => {
+    console.log("Đã nhấn vào nút số", buttonNumber);
+    // playSound(); // Play sound when button is pressed
+    if (isConnected) {
+      const numberFloor = 7; //0 đến 7 là thành 8 tầng
+      setCallBinary((prev) => {
+        const newCallBinary = [...prev];
+        for (let i = 0; i < newCallBinary.length; i++) {
+          // newCallBinary[numberFloor - buttonNumber] = 1;
+          const index = numberFloor - buttonNumber;
+          if (i === index) {
+            newCallBinary[i] = 1;
+          } else {
+            newCallBinary[i] = 0;
+          }
+        }
+        const hexCall = binaryArrayToHex(newCallBinary);
+        setDataSend((prev) => {
+          const newDataSend = [...prev];
+          newDataSend[0] = hexCall;
+          newDataSend[1] = "0x00";
+          newDataSend[2] = "0x00";
+          newDataSend[3] = "0x00";
+
+          return newDataSend;
+        });
+        return newCallBinary;
+      });
+    } else {
+      Alert.alert(
+        "Bluetooth not connected",
+        "Please connect to a Bluetooth device first."
+      );
+    }
+  };
+  // Sử lý nút hold
+  const handleButtonFunctionPress = (buttonFunction) => {
+    console.log("Đã nhấn vào nút chức năng", buttonFunction);
+    // playSound(); // Play sound when button is pressed
+    if (isConnected) {
+      setFuncBinary((prev) => {
+        const newFunctionButton = [...prev];
+        for (let i = 0; i < newFunctionButton.length; i++) {
+          if (i === buttonFunction) {
+            newFunctionButton[i] = 1;
+          } else {
+            newFunctionButton[i] = 0;
+          }
+        }
+        const hexFunction = binaryArrayToHex(newFunctionButton);
+        setDataSend((prev) => {
+          const newDataSend = [...prev];
+          newDataSend[0] = "0x00";
+          newDataSend[1] = "0x00";
+          newDataSend[2] = "0x00";
+          newDataSend[3] = hexFunction;
+
+          return newDataSend;
+        });
+        return newFunctionButton;
+      });
+    } else {
+      Alert.alert(
+        "Bluetooth not connected",
+        "Please connect to a Bluetooth device first."
+      );
+    }
+  };
   // return (
   //   <>
   //     <View style={{ flex: 1, padding: 20 }}>
@@ -286,7 +351,7 @@ export default function App() {
                           },
                         ]}
                         key={"buttonhold"}
-                        // onPress={() => handleToogle()}
+                        onPress={() => handleButtonFunctionPress(5)}
                       >
                         <Text style={styles.buttonTextFunction}>HOLD</Text>
                       </TouchableOpacity>
@@ -302,22 +367,22 @@ export default function App() {
                             },
                           ]}
                           key={"buttonopen"}
-                          // onPress={() => handleButtonFunctionPress(6)}
+                          onPress={() => handleButtonFunctionPress(6)}
                         >
                           <Text style={styles.buttonTextFunction}>OPEN</Text>
                         </TouchableOpacity>
                       </View>
-                      <Button title="Efect" onPress={() => setButton(true)} />
-                      <Button
+                      {/* <Button title="Efect" onPress={() => setButton(true)} /> */}
+                      {/* <Button
                         title="TrucTiep"
                         onPress={() =>
                           writeDataToDevice(
                             serviceUUID,
                             characteristicUUID,
-                            value
+                            "SGVsbG87"
                           )
                         }
-                      />
+                      /> */}
                       <View style={styles.buttonDoor}>
                         <TouchableOpacity
                           style={[
@@ -328,7 +393,7 @@ export default function App() {
                             },
                           ]}
                           key={"buttonclose"}
-                          // onPress={() => handleButtonFunctionPress(7)}
+                          onPress={() => handleButtonFunctionPress(7)}
                         >
                           <Text style={styles.buttonTextFunction}>CLOSE</Text>
                         </TouchableOpacity>
@@ -354,10 +419,10 @@ export default function App() {
                     QUÉT QR ĐỂ KẾT NỐI
                   </Text>
                 </TouchableOpacity>
-                <Button
+                {/* <Button
                   title="Quét thiết bị BLE"
                   onPress={scanForPeripherals}
-                />
+                /> */}
 
                 <View>
                   <TouchableOpacity
