@@ -15,12 +15,13 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Buffer } from "buffer";
-import { use } from "react";
+import { PermissionsAndroid, Platform } from "react-native";
+import * as ExpoDevice from "expo-device";
 
 const bleManager = new BleManager(); // Tạo đối tượng BLE Manager
 
 export default function App() {
-  const [devices, setDevices] = useState([]); // Lưu danh sách các thiết bị tìm thấy
+  // const [devices, setDevices] = useState([]); // Lưu danh sách các thiết bị tìm thấy
   const [isConnected, setIsConnected] = useState(false); // Theo dõi trạng thái kết nối
   const [button, setButton] = useState(false); // Biến theo dõi trạng thái button
   const [connectedDevice, setConnectedDevice] = useState(null); // Lưu thiết bị đã kết nối
@@ -35,6 +36,7 @@ export default function App() {
   const [callBinary, setCallBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
   const [funcBinary, setFuncBinary] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
   const [dataSend, setDataSend] = useState([]);
+
   console.log("Kiem tra", dataSend);
   const handlePermissionRequest = () => {
     requestPermission().then(() => {
@@ -42,6 +44,61 @@ export default function App() {
         setCameraEnabled(true);
       }
     });
+  };
+  useEffect(() => {
+    requestPermissions();
+    // return () => {
+    //   // Cleanup BLE manager when the component unmounts
+    //   bleManager.destroy();
+    // };
+  }, []);
+  //Phan Quyen
+  const requestPermissions = async () => {
+    if (Platform.OS === "android") {
+      if ((ExpoDevice.platformApiLevel ?? -1) < 31) {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          {
+            title: "Location Permission",
+            message: "Bluetooth Low Energy requires Location",
+            buttonPositive: "OK",
+          }
+        );
+        setHasPermissions(granted === PermissionsAndroid.RESULTS.GRANTED);
+      } else {
+        const bluetoothScanPermission = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+          {
+            title: "Bluetooth Permission",
+            message: "This app requires Bluetooth Scan Permission",
+            buttonPositive: "OK",
+          }
+        );
+        const bluetoothConnectPermission = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+          {
+            title: "Bluetooth Permission",
+            message: "This app requires Bluetooth Connect Permission",
+            buttonPositive: "OK",
+          }
+        );
+        const fineLocationPermission = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          {
+            title: "Location Permission",
+            message: "Bluetooth Low Energy requires Location",
+            buttonPositive: "OK",
+          }
+        );
+        setHasPermissions(
+          bluetoothScanPermission === PermissionsAndroid.RESULTS.GRANTED &&
+            bluetoothConnectPermission === PermissionsAndroid.RESULTS.GRANTED &&
+            fineLocationPermission === PermissionsAndroid.RESULTS.GRANTED
+        );
+      }
+    } else {
+      setHasPermissions(true); // Trên iOS, quyền đã được cấp mặc định
+    }
   };
   const handleBarcodeScanned = ({ type, data }) => {
     setScanned(true);
@@ -63,11 +120,13 @@ export default function App() {
   //save trang thai quet
   useEffect(() => {
     if (idFromQr !== null && isConnected) {
+      console.log("useEffcet Save idFromQr", idFromQr);
       saveLastDevice(idFromQr);
     }
-  }, [idFromQr]);
+  }, [idFromQr, isConnected]);
   //Save last device connected
   const saveLastDevice = async (data) => {
+    console.log("Saving last connected device:", data);
     try {
       const jsonData = JSON.stringify(data);
       await AsyncStorage.setItem("ID_FROM_QR", jsonData);
@@ -124,7 +183,7 @@ export default function App() {
   // Hàm quét thiết bị
   const scanForPeripherals = (parsedData) => {
     console.log("Bắt đầu quét thiết bị BLE...");
-    setDevices([]); // Xóa danh sách thiết bị cũ
+    // setDevices([]); // Xóa danh sách thiết bị cũ
 
     bleManager.startDeviceScan(null, null, (error, device) => {
       if (error) {
